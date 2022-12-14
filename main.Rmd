@@ -1,0 +1,57 @@
+---
+title: "Exploring and Modeling Baseball Hitting"
+author: "Alex Jackson"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r packages}
+library(tidyverse)
+library(baseballr)
+library(knitr)
+```
+
+```{r data}
+#initializations
+dates <- seq(as.Date("2022-04-07"), as.Date("2022-10-05"), by="days")
+pks<-c()
+pbp2022 = data.frame()
+
+#scraping data
+for(i in 1:length(dates)){
+  temp <- mlb_game_pks(dates[i])$game_pk
+  pks = append(pks, temp)
+}
+for(i in 1:length(a)){
+  temp_table = mlb_pbp(a[i]) %>% 
+    filter(details.isInPlay == TRUE)
+  pbp2022 = rbind(pbp2022, temp_table, fill=TRUE)
+}
+
+
+#get cubs game codes
+cubs <- mlb_schedule(2022) %>% 
+  filter(series_description == "Regular Season",
+         status_detailed_state == "Final" | status_detailed_state == "Completed Early",
+         teams_home_team_name == "Chicago Cubs" | teams_away_team_name == "Chicago Cubs")
+a <- cubs$game_pk
+
+#selecting and cleaning variables
+main <- pbp2022 %>% 
+  select(pitchNumber, count.balls.start, count.strikes.start, count.outs.start, hitData.launchSpeed, hitData.launchAngle, hitData.totalDistance, result.event, matchup.batSide.description, matchup.pitchHand.description, home_team, batting_team, pitchData.endSpeed, pitchData.zone, pitchData.breaks.spinRate) %>% 
+  rename(balls = count.balls.start, strikes = count.strikes.start, outs = count.outs.start, launch_speed = hitData.launchSpeed, launch_angle = hitData.launchAngle, bat_side = matchup.batSide.description, pitch_side = matchup.pitchHand.description, pitch_speed = pitchData.endSpeed, spin = pitchData.breaks.spinRate, distance = hitData.totalDistance) %>% 
+  mutate(zone = ifelse(pitchData.zone < 10, TRUE, FALSE),
+         same_side = ifelse(bat_side == pitch_side, TRUE, FALSE),
+         home_team = ifelse(home_team == batting_team, TRUE, FALSE),
+         hit = ifelse(result.event == "Single" | 
+                        result.event == "Double" | 
+                        result.event == "Triple" | 
+                        result.event == "Home Run", TRUE, FALSE)) %>% 
+  select(-c(pitchData.zone, batting_team, bat_side, pitch_side, result.event))
+```
+
+
