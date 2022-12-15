@@ -13,6 +13,7 @@ knitr::opts_chunk$set(echo = FALSE)
 library(tidyverse)
 library(baseballr)
 library(knitr)
+library(naniar)
 ```
 
 ```{r data}
@@ -41,17 +42,141 @@ cubs <- mlb_schedule(2022) %>%
 a <- cubs$game_pk
 
 #selecting and cleaning variables
-main <- pbp2022 %>% 
-  select(pitchNumber, count.balls.start, count.strikes.start, count.outs.start, hitData.launchSpeed, hitData.launchAngle, hitData.totalDistance, result.event, matchup.batSide.description, matchup.pitchHand.description, home_team, batting_team, pitchData.endSpeed, pitchData.zone, pitchData.breaks.spinRate) %>% 
-  rename(balls = count.balls.start, strikes = count.strikes.start, outs = count.outs.start, launch_speed = hitData.launchSpeed, launch_angle = hitData.launchAngle, bat_side = matchup.batSide.description, pitch_side = matchup.pitchHand.description, pitch_speed = pitchData.endSpeed, spin = pitchData.breaks.spinRate, distance = hitData.totalDistance) %>% 
+pre_main <- pbp2022 %>% 
+  select(count.balls.start, count.strikes.start, count.outs.start, hitData.launchSpeed, hitData.launchAngle, hitData.totalDistance, result.event, matchup.batSide.description, matchup.pitchHand.description, home_team, batting_team, pitchData.endSpeed, pitchData.zone, pitchData.breaks.spinRate, details.type.description) %>% 
+  rename(balls = count.balls.start, strikes = count.strikes.start, outs = count.outs.start, launch_speed = hitData.launchSpeed, launch_angle = hitData.launchAngle, bat_side = matchup.batSide.description, pitch_side = matchup.pitchHand.description, pitch_type = details.type.description, pitch_speed = pitchData.endSpeed, spin = pitchData.breaks.spinRate, distance = hitData.totalDistance) %>% 
   mutate(zone = ifelse(pitchData.zone < 10, TRUE, FALSE),
          same_side = ifelse(bat_side == pitch_side, TRUE, FALSE),
          home_team = ifelse(home_team == batting_team, TRUE, FALSE),
          hit = ifelse(result.event == "Single" | 
                         result.event == "Double" | 
                         result.event == "Triple" | 
-                        result.event == "Home Run", TRUE, FALSE)) %>% 
+                        result.event == "Home Run", TRUE, FALSE),
+         pitch_type = case_when(
+           pitch_type %in% c("Curveball", "Knuckle Curve", "Eephus", "Slow Curve", "Slider") ~ "Breaking Ball",
+           pitch_type %in% c("Fastball", "Four-Seam Fastball", "Cutter", "Splitter") ~ "Fastball",
+           pitch_type %in% c("Changeup") ~ "Changeup")) %>% 
+  filter(batting_team == "Chicago Cubs") %>% 
   select(-c(pitchData.zone, batting_team, bat_side, pitch_side, result.event))
+
+main <- pre_main %>% 
+  mutate(pitch_type = ifelse(is.na(pitch_type), "Missing", pitch_type)) %>%
+  drop_na()
+```
+
+# Introduction
+
+Baseball is the ultimate statistical sport. Everything in the game seems to fit perfectly in a box and is automatically quantified. Following 'Moneyball,' teams across Major League Baseball began defining the basis on their building team strategy on statistics and models. Through the abundance of statistics in the game, we are able to beat the 'eye test,' which is a revelation that is still fighting its way into other sports. Recently, further advancements in pitch tracking technology have allowed baseball statisticians to find new ways to quantify and simplify complex interactions between the bat and the ball on any given pitch.
+
+One aspect of hitting that teams universally care about is putting the ball in play. It is understood that, generally, good things happen when the ball is put into play. Being put into play is classified as any time the ball is active off a pitch. For the purpose of this study, this means when the batter makes contact with the ball and the ball goes into the field of play, the ball is 'in play.' These balls in play can either result in a hit (a single, double, triple or home run) or an out.
+
+The analysis in this paper seeks to delve into the aspects of a single pitch that benefit the chances of that ball being put into play for a hit. These aspects include situation variables, as well as pitch characteristics and hit characteristics. The model does not explore any prior information on the batter or pitcher to generalize the resulting information. This modeling is important for two reasons. First, players can better understand how aspects of the game they need to be focusing on to improve. Batters always want to increase there chances of getting hits and pitchers always want to find ways to get outs. Additionally, team general managers and coaches are always looking for ways to improve their rosters and an analysis like this may be able to help them look over their team and find the areas that need improvement. While this paper focuses on the inference side of modeling, in theory, with enough data and variables, it could have predictive applications as well.
+
+Due to the difficulty of data collection and sheer number of balls put in play in 2022 across the league. We have chosen to look at only balls in play by the Chicago Cubs last season. Due to this, there cannot be sweeping generalizations made about the game of baseball and the league as a whole, but rather we focus on the applicability of the results to the Cubs only.
+
+[Hypothesis]
+
+## Explaratory Data Analysis
+
+```{r pitching}
+ggplot(data=main, aes(x=pitch_speed, y = spin, color = pitch_type)) + 
+  geom_point() +
+  labs(title = "Pitch Segmentation by Speed and Spin", x="Speed (MPH)", y="Spin (RPM)",
+       color = "Pitch Type")
+ggplot(main, aes(x=same_side, fill=pitch_type))+geom_bar(position = "fill")
+ggplot(main, aes(x=balls, fill=pitch_type))+geom_bar(position = "fill")
+ggplot(main, aes(x=pitch_speed, y=launch_speed, color=hit))+geom_point()
+ggplot(main, aes(x=spin, y=launch_angle, color=hit))+geom_point()
+```
+
+```{r hitting}
+ggplot(data=main, aes(x=launch_angle, y=launch_speed, color=hit)) +
+  geom_point() +
+  labs(title = "Batting 'Sweet Spot' Mapping", x="Launch Angle (Degrees -- 0 is plane of bat)", y="Launch Speed (MPH)",
+       color="Hit")
+ggplot(main, aes(x=launch_angle, y=distance, color=hit))+geom_point()
+ggplot(main, aes(x=launch_speed, y=distance, color=hit))+geom_point()
 ```
 
 
+
+# Methodology
+
+## Variable Selection and Alteration
+
+The main method of variable selection is based on domain knowledge. We avoided using any type of automatic selection in order to prevent maximizing or minimizing an arbitrary statistic. 
+
+```{r}
+model <- glm(hit ~ 
+               factor(balls) + 
+               factor(strikes) + 
+               factor(outs) + 
+               home_team +
+               same_side+
+               pitch_type+
+               pitch_speed + 
+               spin + 
+               zone + 
+               launch_speed + 
+               launch_angle + 
+               distance + 
+               pitch_type*pitch_speed +
+               pitch_type*spin+
+               distance*launch_angle+
+               distance*launch_speed,
+             data = main)
+```
+
+# Results
+
+```{r}
+data.frame(summary(model)$coef) %>%
+  rownames_to_column() %>% 
+  mutate("Variable" = rowname, `exp(Estimate)` = exp(Estimate), `P-Value` = ifelse(round(`Pr...t..`,2) ==0, "<0.01", round(`Pr...t..`,2)), `Confidence (2.5%)` = exp(Estimate - ((1.96)*`Std..Error`)),
+         `Confidence (97.5%)` = exp(Estimate + ((1.96)*`Std..Error`))) %>%
+    select(Variable, Estimate, `exp(Estimate)`, `Confidence (2.5%)`, `Confidence (97.5%)`, `P-Value`) %>%
+  mutate(Variable = case_when(Variable == "(Intercept)" ~ "Intercept",
+                              Variable == "factor(balls)1" ~ "1 Ball Count",
+                              Variable == "factor(balls)2" ~ "2 Ball Count",
+                              Variable == "factor(balls)3" ~ "3 Ball Count",
+                              Variable == "factor(strikes)1" ~ "1 Strike Count",
+                              Variable == "factor(strikes)2" ~ "2 Strike Count",
+                              Variable == "factor(outs)1" ~ "1 Out",
+                              Variable == "factor(outs)2" ~ "2 Outs",
+                              Variable == "home_teamTRUE" ~ "Is Home Team",
+                              Variable == "same_sideTRUE" ~ "Pitcher-Batter Same Handed",
+                              Variable == "pitch_typeChangeup" ~ "Changeup",
+                              Variable == "pitch_typeFastball" ~ "Fastball",
+                              Variable == "pitch_typeMissing" ~ "Missing",
+                              Variable == "pitch_speed" ~ "Pitch Speed (MPH)",
+                              Variable == "spin" ~ "Spin (RPM)",
+                              Variable == "zoneTRUE" ~ "Pitch in Strike Zone",
+                              Variable == "launch_speed" ~ "Launch Speed (MPH)",
+                              Variable == "launch_angle" ~ "Launch Angle (Degrees)",
+                              Variable == "distance" ~ "Distance (Feet)",
+                              Variable == "launch_speed" ~ "Launch Speed (MPH)",
+                              Variable == "pitch_typeChangeup:pitch_speed" ~ "Changeup*Pitch Speed",
+                              Variable == "pitch_typeFastball:pitch_speed" ~ "Fastball*Pitch Speed",
+                              Variable == "pitch_typeMissing:pitch_speed" ~ "Missing*Pitch Speed",
+                              Variable == "pitch_typeChangeup:spin" ~ "Changeup*Spin",
+                              Variable == "pitch_typeFastball:spin" ~ "Fastball*Spin",
+                              Variable == "pitch_typeMissing:spin" ~ "Missing*Spin",
+                              Variable == "launch_angle:distance" ~ "Launch Angle*Distance",
+                              Variable == "launch_speed:distance" ~ "Launch Speed*Distance"
+                              )) %>% 
+  kable(digits = 3)
+```
+
+
+# Discussion
+
+$$ \frac{\pi_i}{1-\pi_i}= \exp(\beta_0+\beta_1x_{\text{1 Ball Count,}i}+\beta_2x_{\text{2 Ball Count,}i}+\beta_3x_{\text{3 Ball Count,}i}+\beta_4x_{\text{1 Strike Count,}i}+ \\ \beta_5x_{\text{2 Strike Count,}i}+\beta_6x_{\text{1 Out,}i}+\beta_7x_{\text{2 Outs,}i}+\beta_8x_{\text{Is Home Team,}i}+\beta_9x_{\text{Pitch-Batter Same Handed,}i}+ \\ \beta_{10}x_{\text{Changeup,}i}+\beta_{11}x_{\text{Fastball,}i}+\beta_{12}x_{\text{Missing,}i}+\beta_{13}x_{\text{Pitch Speed,}i}+\beta_{14}x_{\text{Spin,}i}+\beta_{15}x_{\text{Strike Zone,}i}+ \\ \beta_{16}x_{\text{Launch Speed,}i}+\beta_{17}x_{\text{Launch Angle,}i}+\beta_{18}x_{\text{Distance,}i}+\beta_{19}x_{\text{Changeup*Pitch Speed,}i}+ \\ \beta_{20}x_{\text{Fastball*Pitch Speed,}i}+\beta_{21}x_{\text{PT Missing*Pitch Speed,}i}+\beta_{22}x_{\text{Changeup*Spin,}i}+\beta_{23}x_{\text{Fastball*Spin,}i}+ \\ \beta_{24}x_{\text{PT Missing*Spin,}i}+\beta_{25}x_{\text{Launch Angle*Distance,}i}+\beta_{26}x_{\text{Launch Speed*Distance,}i}) $$
+
+# Appendix
+
+## Figure A: Visualizing Missing Data
+```{r A}
+vis_miss(pre_main)
+```
+
+## Figure B: 
