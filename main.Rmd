@@ -14,32 +14,13 @@ library(tidyverse)
 library(baseballr)
 library(knitr)
 library(naniar)
+library(patchwork)
 ```
 
 ```{r data}
-#initializations
-dates <- seq(as.Date("2022-04-07"), as.Date("2022-10-05"), by="days")
-pks<-c()
-pbp2022 = data.frame()
+#read rds
+pbp2022 <- readRDS("data.rds")
 
-#scraping data
-for(i in 1:length(dates)){
-  temp <- mlb_game_pks(dates[i])$game_pk
-  pks = append(pks, temp)
-}
-for(i in 1:length(a)){
-  temp_table = mlb_pbp(a[i]) %>% 
-    filter(details.isInPlay == TRUE)
-  pbp2022 = rbind(pbp2022, temp_table, fill=TRUE)
-}
-
-
-#get cubs game codes
-cubs <- mlb_schedule(2022) %>% 
-  filter(series_description == "Regular Season",
-         status_detailed_state == "Final" | status_detailed_state == "Completed Early",
-         teams_home_team_name == "Chicago Cubs" | teams_away_team_name == "Chicago Cubs")
-a <- cubs$game_pk
 
 #selecting and cleaning variables
 pre_main <- pbp2022 %>% 
@@ -70,32 +51,34 @@ Baseball is the ultimate statistical sport. Everything in the game seems to fit 
 
 One aspect of hitting that teams universally care about is putting the ball in play. It is understood that, generally, good things happen when the ball is put into play. Being put into play is classified as any time the ball is active off a pitch. For the purpose of this study, this means when the batter makes contact with the ball and the ball goes into the field of play, the ball is 'in play.' These balls in play can either result in a hit (a single, double, triple or home run) or an out.
 
-The analysis in this paper seeks to delve into the aspects of a single pitch that benefit the chances of that ball being put into play for a hit. These aspects include situation variables, as well as pitch characteristics and hit characteristics. The model does not explore any prior information on the batter or pitcher to generalize the resulting information. This modeling is important for two reasons. First, players can better understand how aspects of the game they need to be focusing on to improve. Batters always want to increase there chances of getting hits and pitchers always want to find ways to get outs. Additionally, team general managers and coaches are always looking for ways to improve their rosters and an analysis like this may be able to help them look over their team and find the areas that need improvement. While this paper focuses on the inference side of modeling, in theory, with enough data and variables, it could have predictive applications as well.
+The analysis in this paper seeks to delve into the aspects of a single pitch that benefit the chances of that ball being put into play for a hit by creating a model attempts to predict the probability of a ball in play becoming a hit. These aspects include game situation variables, as well as pitch characteristics and hit characteristics. The model does not explore any prior information on the batter or pitcher to generalize the resulting information. This modeling is important for two reasons. First, players can better understand aspects of the game they need to be focusing on to improve. Batters always want to increase there chances of getting hits and pitchers always want to find ways to get outs. Additionally, team general managers and coaches are always looking for ways to improve their rosters and an analysis like this may be able to help them look over their team and find the areas that need improvement by seeing which players are good or bad at certain aspects. While this paper focuses on the inference side of modeling, in theory, with enough data and variables, it could have predictive applications as well.
 
-Due to the difficulty of data collection and sheer number of balls put in play in 2022 across the league. We have chosen to look at only balls in play by the Chicago Cubs last season. Due to this, there cannot be sweeping generalizations made about the game of baseball and the league as a whole, but rather we focus on the applicability of the results to the Cubs only.
+We believe there will be statistically significant evidence of certain aspects affecting the probability of generating hits. Mainly, we believe that bat-contact statistics will prove to have far larger effects than game state or pitching statistics.
 
-[Hypothesis]
+The data is collected from the `baseballr` package using their pre-built web scrapping functions of play-by-play games from any year with recorded play-by-play data. The package scrapes from baseball-reference.com and baseballsavant.com to get the information as well as advanced statistics. However, due to the difficulty of data collection and sheer number of balls put in play in 2022 across the league. We have chosen to look at only balls in play by the Chicago Cubs last season. Due to this, there cannot be sweeping generalizations made about the game of baseball and the league as a whole, but rather we focus on the applicability of the results to the Cubs only.
 
 ## Explaratory Data Analysis
 
-```{r pitching}
+Our exploratory data analysis focuses both on better understanding the data, as well as uncovering potential relationships in the variables for possible interaction terms later on in our model. In exploring the pitching-related variables, it is apparent in Figure 1 that the combination of spin and pitch speed reveal the grouping of pitch types. This makes sense because speed and spin often dictate the classification of pitches. However, different pitches throw each pitch type differently and thus groupings span large areas. 
+
+In Appendix Figure B, we also explore the breakdown of pitch type mixing by batter-pitcher handedness, ball and strike counts. The most noticeable attribute there is the flexible use of changeups and breaking balls. Pitchers on the same side as the batter move away from changeups and lean more heavily on breaking balls. Additionally, pitchers love to lean more on off-speed pitches in "safer" counts (i.e. low balls, high strikes) and turn more heavily to fastballs in tougher counts (high balls, low strikes).
+
+```{r pitching, fig.align='center', fig.height=4, fig.width=4}
 ggplot(data=main, aes(x=pitch_speed, y = spin, color = pitch_type)) + 
   geom_point() +
-  labs(title = "Pitch Segmentation by Speed and Spin", x="Speed (MPH)", y="Spin (RPM)",
+  labs(title = "Figure 1: Pitch Segmentation", x="Speed (MPH)", y="Spin (RPM)",
        color = "Pitch Type")
-ggplot(main, aes(x=same_side, fill=pitch_type))+geom_bar(position = "fill")
-ggplot(main, aes(x=balls, fill=pitch_type))+geom_bar(position = "fill")
-ggplot(main, aes(x=pitch_speed, y=launch_speed, color=hit))+geom_point()
-ggplot(main, aes(x=spin, y=launch_angle, color=hit))+geom_point()
 ```
 
-```{r hitting}
+When it comes to batting, the center of our EDA focuses on visualizing evidence of a "sweet spot." It is immediately apparent from Figure 2 that a line of hits in the 12-24 degree range is almost invariable to the speed at which they are hit. Additionally, as balls reach a certain exit velocity, the hits spread and angle seems to matter less. 
+
+In Appendix Figure C, we relate distances to hits. In those graphs, there are two very distinct and interesting shapes. As we explore launch angle, it is apparent there is a very strict distance each launch angle travels. In the 25-50 degree range there is a bit more variability, but we also see a dead-spot in distance, where we can assume the outfields catch most balls. When exporing launch speed, there is a clear maximum distance associated with each speed, however there is much more randomness to wheter each ball was caught. We do see the similar dead-spot in distance at around 300 feet. 
+
+```{r hitting, fig.align='center', fig.height=4, fig.width=4}
 ggplot(data=main, aes(x=launch_angle, y=launch_speed, color=hit)) +
   geom_point() +
-  labs(title = "Batting 'Sweet Spot' Mapping", x="Launch Angle (Degrees -- 0 is plane of bat)", y="Launch Speed (MPH)",
+  labs(title = "Figure 2: Batting 'Sweet Spot' Mapping", x="Launch Angle (Degrees -- 0 is plane of bat)", y="Launch Speed (MPH)",
        color="Hit")
-ggplot(main, aes(x=launch_angle, y=distance, color=hit))+geom_point()
-ggplot(main, aes(x=launch_speed, y=distance, color=hit))+geom_point()
 ```
 
 
@@ -104,7 +87,59 @@ ggplot(main, aes(x=launch_speed, y=distance, color=hit))+geom_point()
 
 ## Variable Selection and Alteration
 
-The main method of variable selection is based on domain knowledge. We avoided using any type of automatic selection in order to prevent maximizing or minimizing an arbitrary statistic. 
+The main method of variable selection is based on domain baseball knowledge. We avoided using any type of automatic selection in order to prevent maximizing or minimizing an arbitrary statistic. Our approach to variable selection involved using variables from the three different aspects of an at-bat: game state, pitching, and hitting.
+
+### Target Variable:
+
+* Hit: Created indicator if a hit was recorded regardless of the type of hit (TRUE for yes, FALSE for no). 
+
+### Game State:
+
+* Ball Count: The number of balls in the at-bat at time of the pitch. Modeled as a factor with levels 0, 1, 2 and 3. Selected because the count of the at-bat may dictate a batter's approach to the next pitch.
+* Strike Count: The number of strikes in the at-bat at time of the pitch. Modeled as a factor with levels 0, 1 and 2. Selected because the count of the at-bat may dictate a batter's approach to the next pitch.
+* Out Count: The number of outs in the inning at time of the pitch. Modeled as a factor with levels 0, 1 and 2. Selected because the outs going into the at-bat may dictate a batter's approach to the at-bat.
+* Is Home Team: Created, set to TRUE if the better is on the home team and FALSE if on the away team. Selected for investigation into home field advantage claims, as seen in a 2013 Bleacher Report Article [https://bleacherreport.com/articles/1803416-is-home-field-advantage-as-important-in-baseball-as-other-major-sports].
+* Pitcher-Batter Same Handed: Created, set to TRUE if the pitcher and batter are both righties or lefties, FALSE if they are different. Selected because throwing from the same side as a hitter is generally considered an advantage for a pitcher. 
+
+### Pitching:
+
+* Pitch Type: Created, the kind of pitch that was thrown. Grouped specific pitch types together into Fastball, Breaking Ball, Changeup or Missing (see missing data paragraph) to simplify the output and account for certain pitchers only throwing certain types of pitches. Selected because pitch type can dictate how a batter swings and makes contact with a ball.
+* Pitch Speed: The speed of the pitch in MPH. Selected because certain pitch speeds may be harder to hit, especially when combined with `pitch_type`.
+* Spin Rate: The spin rate of the pitch in RPM. Selected because certain pitch spins may cause more movement, especially when combined with `pitch_type`.
+* In Strike Zone: Created variable to indicate whether the pitch was in the strike zone (TRUE for yes, FALSE for no). Created from the `pitchData.zone` variable which provides the numbered zone in which the ball passed through (1-13, 1-9 is theoretical strike zone). Selected because pitches in the zone are, in theory, more likely to be hittable than pitches outside the zone.
+
+### Hitting:
+
+* Launch Speed: Exit velocity for which the ball left the bat (MPH). Selected because exit velocity may cause the ball to travel farther or escape the reach of defenders.
+* Launch Angle: Angle at which the ball left the bat, with 0 being the perpendicular plane of the bat (degrees). Selected because the angle at which the ball leaves the bat can either cause an easy out on a popout/flyout, become a home run, or turn into a different kind of hit on the ground.  
+* Distance: The distance the ball traveled on the fly from home plate (feet). Selected because the distance hit can elude the defenders, or be hit within their fielding range. 
+
+### Interactions:
+
+Several interactions were chosen based on the findings within the EDA. Mainly, interactions between the pitch type and pitch speed/spin were obvious to include because certain pitches are based on being faster/having more spin than others. Additionally, interactions between ball distance and launch angle/speed were obvious inclusions because distance is a direct factor of speed and angle, as well as external weather factors not included in the model. 
+
+## Data Missingness
+
+After doing the initial data collection, filtering and variable selection, there was still some missing data issues. As seen in Figure A in the Appendix, while the overall missingness was only at XX%, `pitch_type` had a missing rate of 21.29%. This could be for a number of factors that would be impossible to tell which exactly is the issue. Thus, instead of dropping all observations with the variable missing or dropping the variable itself. We chose to create a 4th pitch type as "Missing" and still include the variable in the model. The EDA on pitch types shows in more detail what this looks like.
+
+Launch Speed, Launch Angle, Distance, Pitch Speed, Spin and Strike Zone also all experienced some type of missing data with the most being at 2.21%. In Figure A, we can see most of the missing entries happened in the same at-bats for which we can assume there was some type of mechanical glitch in those moments that did not allow the information to be recorded. Thus, we felt comfortable just dropping those entries and finalizing our dataset at 3,907 balls in play. 
+
+## Model
+
+We chose to use a logistic regression model to solve for this analysis. Logistic regression using the `glm()` function allows for us to create a model that yields predicted probabilities of a binary event, which is exactly what we are attempting to study. Logistic regression has the added benefit of ease of interpretability, which is especially important because this study focuses on the interpretation and analysis of the variables in the model and not as much on the actual predicted probabilities. If we were more focused on predicted probabilities, there may be better model fits than logistic regression, but more advanced models sacrifice interpretability for predictive results and that is not what we are hoping to achieve.
+
+In total, the model is fit with 12 variables and 4 interaction terms. It is also trained on the same data as described previously with no additional filtering having been made so that as much data as possible is used. Discussion of the model assumptions can be found in the Appendix. The mathematical formula for our final model is as seen here:
+
+```{=tex}
+\begin{align*}
+\frac{\pi_i}{1-\pi_i}&= \exp(\beta_0+\beta_1x_{\text{1 Ball Count,}i}+\beta_2x_{\text{2 Ball Count,}i}+\beta_3x_{\text{3 Ball Count,}i}+\beta_4x_{\text{1 Strike Count,}i} \\ &+
+\beta_5x_{\text{2 Strike Count,}i}+\beta_6x_{\text{1 Out,}i}+\beta_7x_{\text{2 Outs,}i}+\beta_8x_{\text{Is Home Team,}i}+\beta_9x_{\text{Pitch-Batter Same Handed,}i} \\ &+
+\beta_{10}x_{\text{Changeup,}i}+\beta_{11}x_{\text{Fastball,}i}+\beta_{12}x_{\text{Missing,}i}+\beta_{13}x_{\text{Pitch Speed,}i}+\beta_{14}x_{\text{Spin,}i}+\beta_{15}x_{\text{Strike Zone,}i} \\ &+
+\beta_{16}x_{\text{Launch Speed,}i}+\beta_{17}x_{\text{Launch Angle,}i}+\beta_{18}x_{\text{Distance,}i}+\beta_{19}x_{\text{Changeup*Pitch Speed,}i}+ \\ &+
+\beta_{20}x_{\text{Fastball*Pitch Speed,}i}+\beta_{21}x_{\text{PT Missing*Pitch Speed,}i}+\beta_{22}x_{\text{Changeup*Spin,}i}+\beta_{23}x_{\text{Fastball*Spin,}i} \\ &+
+\beta_{24}x_{\text{PT Missing*Spin,}i}+\beta_{25}x_{\text{Launch Angle*Distance,}i}+\beta_{26}x_{\text{Launch Speed*Distance,}i})
+\end{align*}
+```
 
 ```{r}
 model <- glm(hit ~ 
@@ -170,7 +205,7 @@ data.frame(summary(model)$coef) %>%
 
 # Discussion
 
-$$ \frac{\pi_i}{1-\pi_i}= \exp(\beta_0+\beta_1x_{\text{1 Ball Count,}i}+\beta_2x_{\text{2 Ball Count,}i}+\beta_3x_{\text{3 Ball Count,}i}+\beta_4x_{\text{1 Strike Count,}i}+ \\ \beta_5x_{\text{2 Strike Count,}i}+\beta_6x_{\text{1 Out,}i}+\beta_7x_{\text{2 Outs,}i}+\beta_8x_{\text{Is Home Team,}i}+\beta_9x_{\text{Pitch-Batter Same Handed,}i}+ \\ \beta_{10}x_{\text{Changeup,}i}+\beta_{11}x_{\text{Fastball,}i}+\beta_{12}x_{\text{Missing,}i}+\beta_{13}x_{\text{Pitch Speed,}i}+\beta_{14}x_{\text{Spin,}i}+\beta_{15}x_{\text{Strike Zone,}i}+ \\ \beta_{16}x_{\text{Launch Speed,}i}+\beta_{17}x_{\text{Launch Angle,}i}+\beta_{18}x_{\text{Distance,}i}+\beta_{19}x_{\text{Changeup*Pitch Speed,}i}+ \\ \beta_{20}x_{\text{Fastball*Pitch Speed,}i}+\beta_{21}x_{\text{PT Missing*Pitch Speed,}i}+\beta_{22}x_{\text{Changeup*Spin,}i}+\beta_{23}x_{\text{Fastball*Spin,}i}+ \\ \beta_{24}x_{\text{PT Missing*Spin,}i}+\beta_{25}x_{\text{Launch Angle*Distance,}i}+\beta_{26}x_{\text{Launch Speed*Distance,}i}) $$
+
 
 # Appendix
 
@@ -179,4 +214,28 @@ $$ \frac{\pi_i}{1-\pi_i}= \exp(\beta_0+\beta_1x_{\text{1 Ball Count,}i}+\beta_2x
 vis_miss(pre_main)
 ```
 
-## Figure B: 
+## Figure B: Extended Pitching EDA
+
+```{r fig.width=6}
+t1 <- ggplot(main, aes(x=same_side, fill=pitch_type))+geom_bar(position = "fill") +
+  labs(x= "Pitcher-Batter Same Handed", fill = "Pitch Type")
+t2 <- ggplot(main, aes(x=balls, fill=pitch_type))+geom_bar(position = "fill") +
+  labs(x= "Ball count", fill = "Pitch Type")
+t3 <- ggplot(main, aes(x=strikes, fill=pitch_type))+geom_bar(position = "fill") +
+  labs(x="Strike Count", fill = "Pitch Type")
+
+(t1+t2+t3) + plot_annotation(title="Pitch Type Distribution Breakdowns")
+```
+
+## Figure C: Extended Hitting EDA
+
+```{r fig.width =6}
+t4<-ggplot(main, aes(x=launch_angle, y=distance, color=hit))+geom_point()+
+  labs(x="Launch Angle", y="Distance", color = "Hit")
+t5<-ggplot(main, aes(x=launch_speed, y=distance, color=hit))+geom_point()+
+  labs(x="Launch Speed", y="Distance", color = "Hit")
+
+(t4+t5)+plot_annotation(title="Hit-Distance Relations")
+```
+
+
